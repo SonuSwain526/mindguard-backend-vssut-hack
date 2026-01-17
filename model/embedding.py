@@ -27,7 +27,7 @@ def get_embedding(text):
 
     return embeddings.numpy()
 
-text = "I have exams next week and I feel stressed"
-embedding = get_embedding(text)
+# text = "I have exams next week and I feel stressed"
+# embedding = get_embedding(text)
 
-print(embedding)
+# print(embedding)
