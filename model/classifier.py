@@ -68,7 +68,7 @@ x = np.array(x)
 
 
 encoder = LabelEncoder()
-y = encoder.fit_transform(df["status"])
+y = encoder.fit_transform(df["stress_level"])
 
 
 

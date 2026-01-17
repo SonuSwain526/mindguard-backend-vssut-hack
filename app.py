@@ -1,55 +1,60 @@
+import os
+import joblib
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import joblib
-
+from openai import OpenAI
 from model.embedding import get_embedding
-from rules.rule_engine import get_suggestion
 
-# ----------------- Load Model -----------------
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Initialize OpenAI (Set your key in environment variables or replace here)
+client = OpenAI(api_key="OPENAI_API_KEY")
+
+# Load your custom-trained models
 classifier = joblib.load("model/stress_classifier.pkl")
 label_encoder = joblib.load("model/label_encoder.pkl")
 
-# ----------------- App -----------------
 app = FastAPI(title="MindGuard API")
 
-# ----------------- CORS -----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # OK for hackathon
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],          # POST, GET, OPTIONS
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ----------------- Request Schema -----------------
 class StressRequest(BaseModel):
     text: str
     sleep_hours: float | None = None
     screen_time: float | None = None
 
-# ----------------- Response Schema -----------------
-class StressResponse(BaseModel):
-    stress_level: str
-    suggestion: str
-
-# ----------------- API Endpoint -----------------
-@app.post("/predict", response_model=StressResponse)
-def predict_stress(data: StressRequest):
-
-    # 1. Text → Embedding
+@app.post("/predict")
+async def predict_stress(data: StressRequest):
+    # 1. Local Inference using your custom model
     embedding = get_embedding([data.text])
-
-    # 2. Classifier prediction
     pred = classifier.predict(embedding)[0]
-    label = label_encoder.inverse_transform([pred])[0]
+    label = label_encoder.inverse_transform([pred])[0] # Returns "Low", "Moderate", or "High"
 
-    # 3. Rule-based suggestion
-    suggestion = get_suggestion(
-        label=label,
-        sleep_hours=data.sleep_hours,
-        screen_time=data.screen_time
+    # 2. Generative Suggestion via OpenAI
+    prompt = (
+        f"The student is experiencing {label} stress. "
+        f"Statement: '{data.text}'. "
+        f"Context: {data.sleep_hours}h sleep, {data.screen_time}h screen time. "
+        "Provide a futuristic, supportive, 2-line suggestion as MindGuard OS."
     )
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You are MindGuard OS, a calm neo-cyberpunk wellness AI."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=80
+    )
+    
+    suggestion = response.choices[0].message.content
 
     return {
         "stress_level": label,

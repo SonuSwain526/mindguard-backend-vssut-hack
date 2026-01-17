@@ -37,7 +37,11 @@ function animate() {
 animate();
 
 /** 3. APP STATE & NAVIGATION **/
-const state = { questions: [], responses: { text: "" } };
+const state = { 
+    questions: [], 
+    responses: { text: "", sleep_hours: null, screen_time: null },
+    predictedLevel: ""
+};
 
 function transition(toId) {
     const active = document.querySelector('section:not(.hidden)');
@@ -75,35 +79,120 @@ function showInitialInput() {
         <textarea id="main-input" class="w-full h-32 p-4 bg-white/5 border border-white/10 rounded-lg outline-none focus:border-[#8A2EFF]" placeholder="Tell us how you feel..."></textarea>
         <button id="analyze-btn" class="w-full py-4 mt-4 bg-[#8A2EFF] font-bold uppercase rounded">Analyze</button>
     `;
-    document.getElementById('analyze-btn').onclick = () => {
+    document.getElementById('analyze-btn').onclick = async () => {
         const txt = document.getElementById('main-input').value;
-        if(txt.includes('sleep') || txt.includes('tired')) state.questions.push('sleep');
-        runAnalysis();
+        if(!txt) return;
+        state.responses.text = txt;
+
+        // First API Call to predict level and decide context-aware questions
+        try {
+            const response = await fetch('http://127.0.0.1:8000/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: state.responses.text })
+            });
+            const result = await response.json();
+            state.predictedLevel = result.stress_level;
+
+            // Trigger follow-ups based on the result
+            if(["Moderate", "High"].includes(state.predictedLevel)) state.questions.push('sleep');
+            if(state.predictedLevel === "High") state.questions.push('screen');
+            
+            processNextStep();
+        } catch(e) {
+            console.error("API Error", e);
+            runAnalysis(); // Fallback
+        }
     };
 }
 
-function runAnalysis() {
+function processNextStep() {
+    if(state.questions.length > 0) {
+        renderAdaptiveQuestion(state.questions.shift());
+    } else {
+        runAnalysis();
+    }
+}
+
+function renderAdaptiveQuestion(type) {
+    const container = document.getElementById('dynamic-content');
+    if(type === 'sleep') {
+        container.innerHTML = `
+            <h2 class="text-2xl font-bold text-white mb-6">How was your sleep?</h2>
+            <button class="w-full p-4 mb-4 border border-white/10 hover:border-[#00E9FF] rounded bg-white/5" onclick="state.responses.sleep_hours=4; processNextStep();">Less than 6h</button>
+            <button class="w-full p-4 border border-white/10 hover:border-[#00E9FF] rounded bg-white/5" onclick="state.responses.sleep_hours=8; processNextStep();">Healthy (7h+)</button>
+        `;
+    } else if(type === 'screen') {
+        container.innerHTML = `
+            <h2 class="text-2xl font-bold text-white mb-6">Typical daily screen time?</h2>
+            <button class="w-full p-4 mb-4 border border-white/10 hover:border-[#FF00A0] rounded bg-white/5" onclick="state.responses.screen_time=10; processNextStep();">High (> 8h)</button>
+            <button class="w-full p-4 border border-white/10 hover:border-[#FF00A0] rounded bg-white/5" onclick="state.responses.screen_time=3; processNextStep();">Low (< 4h)</button>
+        `;
+    }
+}
+
+async function runAnalysis() {
     transition('step-4');
-    setTimeout(() => {
-        transition('results-section');
-        document.getElementById('results-container').innerHTML = `
-            <div class="glass-card p-10 rounded-2xl text-center border-t-4 border-[#FF00A0]">
-                <h3 class="text-6xl font-black">64%</h3>
-                <p class="text-cyan-400 uppercase tracking-widest mt-2">Moderate Stress</p>
-                <button onclick="transition('step-1')" class="mt-6 text-xs uppercase opacity-50 underline">Return Home</button>
-            </div>`;
-    }, 2000);
+    
+    // Final API Call with all context data
+    try {
+        const response = await fetch('http://127.0.0.1:8000/predict', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(state.responses)
+        });
+        const finalResult = await response.json();
+        
+        setTimeout(() => {
+            transition('results-section');
+            showDynamicResults(finalResult);
+        }, 2000);
+    } catch(e) {
+        console.error("Final Predict Error", e);
+    }
+}
+
+function showDynamicResults(result) {
+    const container = document.getElementById('results-container');
+    const colors = {
+        "Low": "#00E9FF",
+        "Moderate": "#8A2EFF",
+        "High": "#FF00A0"
+    };
+    
+    const color = colors[result.stress_level] || "#00E9FF";
+    
+    container.innerHTML = `
+        <div class="glass-card p-12 rounded-3xl text-center border-t-8" style="border-color: ${color}">
+            <h3 class="text-xs uppercase tracking-[0.4em] opacity-60 mb-2">Analysis Complete</h3>
+            <h2 class="text-7xl font-black mb-6" style="color: ${color}">${result.stress_level}</h2>
+            
+            <div class="max-w-md mx-auto p-6 bg-white/5 rounded-2xl border border-white/10 mb-8 italic">
+                "${result.suggestion}"
+            </div>
+            
+            <button onclick="transition('step-1')" class="px-8 py-3 border border-white/20 rounded-full hover:bg-white hover:text-black transition-all">Dismiss Report</button>
+        </div>
+    `;
 }
 
 /** 5. DASHBOARD & CHART **/
 async function renderHistory() {
+    // This would typically fetch from your real SQLite DB via a new endpoint
     const data = [
-        { date: 'Jan 14', level: 40 }, { date: 'Jan 15', level: 65 }, 
-        { date: 'Jan 16', level: 30 }, { date: 'Jan 17', level: 85 }
+        { date: 'Jan 14', level: 'Low' }, { date: 'Jan 15', level: 'Moderate' }, 
+        { date: 'Jan 16', level: 'Low' }, { date: 'Jan 17', level: 'High' }
     ];
 
+    const numericMapping = { "Low": 25, "Moderate": 60, "High": 90 };
+
     const list = document.getElementById('history-list');
-    list.innerHTML = data.map(d => `<div class="p-3 border-b border-white/5 flex justify-between"><span>${d.date}</span><span class="text-[#00E9FF] font-bold">${d.level}%</span></div>`).join('');
+    list.innerHTML = data.map(d => `
+        <div class="p-3 border-b border-white/5 flex justify-between">
+            <span>${d.date}</span>
+            <span class="font-bold" style="color: ${d.level === 'High' ? '#FF00A0' : d.level === 'Moderate' ? '#8A2EFF' : '#00E9FF'}">${d.level}</span>
+        </div>
+    `).join('');
 
     const ctx = document.getElementById('stressChart').getContext('2d');
     if(window.myChart) window.myChart.destroy();
@@ -112,14 +201,30 @@ async function renderHistory() {
         data: {
             labels: data.map(d => d.date),
             datasets: [{
-                label: 'Stress',
-                data: data.map(d => d.level),
+                label: 'Stress Index',
+                data: data.map(d => numericMapping[d.level]),
                 borderColor: '#8A2EFF',
                 backgroundColor: 'rgba(138, 46, 255, 0.1)',
                 fill: true,
-                tension: 0.4
+                tension: 0.4,
+                pointBackgroundColor: '#00E9FF'
             }]
         },
-        options: { plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 100 } } }
+        options: { 
+            plugins: { legend: { display: false } }, 
+            scales: { 
+                y: { 
+                    min: 0, 
+                    max: 100,
+                    ticks: {
+                        callback: function(value) {
+                            if (value === 25) return 'Low';
+                            if (value === 60) return 'Moderate';
+                            if (value === 90) return 'High';
+                        }
+                    }
+                } 
+            } 
+        }
     });
 }
