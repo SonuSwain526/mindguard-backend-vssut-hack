@@ -1,6 +1,16 @@
-flask 
-transformers 
-torch 
-scikit-learn 
-pandas 
+# Core
 numpy
+pandas
+scikit-learn
+joblib
+
+# NLP / Deep Learning
+torch
+transformers
+
+# Backend / API
+fastapi
+uvicorn
+
+# Optional (safe to include)
+tqdm
